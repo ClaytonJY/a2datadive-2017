@@ -1,0 +1,131 @@
+---
+title: "Huron River Watershed Council - A2 Data Dive 2017"
+author: "Clayton Yochum"
+date: "November 11, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(purrr)
+library(readr)
+library(ggplot2)
+
+library(knitr)
+
+opts_chunk$set(echo = TRUE)
+```
+
+## Data Sanity Checks
+
+## Dam River Flow
+
+We'll start with the pre-processed data measuring water flow below three dams on the Huron River. In order from north to south they are New Hudson, Hamburg, and Wall Street.
+
+New Hudson has only daily readings, stops in 2014, but has no missing data. The other two have measurements in 15-minute intervals and have had some missing data imputed, while other gaps remain.
+
+```{r}
+
+dam_tbl <- list(
+  new_hudson  = "../Data/new_hudson_preprocessed.csv",
+  hamburg     = "../Data/hamburg_preprocessed.csv",
+  wall_street = "../Data/wall_street_preprocessed.csv"
+) %>%
+  map_dfr(
+    read_csv,
+    skip = 1,
+    col_names = c("datetime", "discharge"),
+    col_types = "Td",
+    .id = "site"
+  ) %>%
+  mutate(site = factor(site, levels = unique(site)))
+
+dam_tbl %>%
+  head() %>%
+  kable()
+```
+
+We can make sure the time intervals and endpoints match what we expect.
+
+```{r}
+
+dam_tbl %>%
+  group_by(site) %>%
+  summarize(
+    start         = min(datetime),
+    stop          = max(datetime),
+    n             = n(),
+    avg_discharge = mean(discharge)
+  ) %>%
+  kable()
+```
+
+Can we plot it?
+
+```{r}
+
+daily_tbl <- dam_tbl %>%
+  group_by(site, date = as.Date(datetime)) %>%
+  summarize(mean_discharge = mean(discharge))
+
+daily_tbl %>% 
+  ggplot(aes(x = date, y = mean_discharge, color = site)) +
+  geom_line() +
+  facet_wrap(~site, ncol = 1)
+```
+
+We can also free the Y axis and add a smoothing line to get a sense of the baseline differences between sites.
+
+```{r}
+
+daily_tbl %>%
+  ggplot(aes(x = date, y = mean_discharge, color = site)) +
+  geom_line() +
+  geom_smooth(method = "gam") +
+  facet_wrap(~site, ncol = 1, scales = "free_y")
+```
+
+### Rainfall
+
+There's also a set of rain gauge data from the Barton Pond.
+
+Rainfall is measured daily, in inches.
+
+```{r}
+
+rain_tbl <- read_csv(
+  "../Data/barton_pond_raingauge_data.csv",
+  skip = 1,
+  col_names = c("date", "rainfall"),
+  col_types = "Dd"
+)
+
+rain_tbl %>%
+  head() %>%
+  kable()
+```
+
+And a summary again
+
+```{r}
+
+rain_tbl %>%
+  summarize(
+    start    = min(date),
+    stop     = max(date),
+    n        = n(),
+    avg_rain = mean(rainfall)
+  ) %>%
+  kable()
+```
+
+And a plot again
+
+```{r}
+
+rain_tbl %>%
+  ggplot(aes(x = date, y = rainfall)) +
+  geom_line() +
+  geom_smooth(method = "gam")
+```
+
