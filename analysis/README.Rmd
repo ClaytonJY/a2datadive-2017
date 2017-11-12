@@ -30,9 +30,9 @@ New Hudson has only daily readings, stops in 2014, but has no missing data. The 
 ```{r}
 
 dam_tbl <- list(
-  new_hudson  = "../Data/new_hudson_preprocessed.csv",
-  hamburg     = "../Data/hamburg_preprocessed.csv",
-  wall_street = "../Data/wall_street_preprocessed.csv"
+  new_hudson  = "../Huron River Watershed Council/Data/new_hudson_preprocessed.csv",
+  hamburg     = "../Huron River Watershed Council/Data/hamburg_preprocessed.csv",
+  wall_street = "../Huron River Watershed Council/Data/wall_street_preprocessed.csv"
 ) %>%
   map_dfr(
     read_csv,
@@ -97,7 +97,7 @@ Rainfall is measured daily, in inches.
 ```{r}
 
 rain_tbl <- read_csv(
-  "../Data/barton_pond_raingauge_data.csv",
+  "../Huron River Watershed Council/Data/barton_pond_raingauge_data.csv",
   skip = 1,
   col_names = c("date", "rainfall"),
   col_types = "Dd"
@@ -246,7 +246,7 @@ The USGS sets targets for a minimum level of flow beyond each dam. How often do 
 ```{r}
 
 # manually extracted from "Example Numeric Flow Targets.docx"
-flow_targets <- read_csv("flow_targets.csv", col_types = "ciiii") %>%
+flow_targets <- read_csv("../Huron River Watershed Council/Data/flow_targets.csv", col_types = "ciiii") %>%
   mutate(site = factor(site, levels = levels(dam_tbl$site)))
 
 dam_tbl %>%

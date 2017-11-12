@@ -132,9 +132,9 @@ $(document).ready(function () {
 <p>We’ll start with the pre-processed data measuring water flow below three dams on the Huron River. In order from north to south they are New Hudson, Hamburg, and Wall Street.</p>
 <p>New Hudson has only daily readings, stops in 2014, but has no missing data. The other two have measurements in 15-minute intervals and have had some missing data imputed, while other gaps remain.</p>
 <pre class="r"><code>dam_tbl &lt;- list(
-  new_hudson  = &quot;../Data/new_hudson_preprocessed.csv&quot;,
-  hamburg     = &quot;../Data/hamburg_preprocessed.csv&quot;,
-  wall_street = &quot;../Data/wall_street_preprocessed.csv&quot;
+  new_hudson  = &quot;../Huron River Watershed Council/Data/new_hudson_preprocessed.csv&quot;,
+  hamburg     = &quot;../Huron River Watershed Council/Data/hamburg_preprocessed.csv&quot;,
+  wall_street = &quot;../Huron River Watershed Council/Data/wall_street_preprocessed.csv&quot;
 ) %&gt;%
   map_dfr(
     read_csv,
@@ -255,7 +255,7 @@ daily_tbl %&gt;%
 <p>There’s also a set of rain gauge data from the Barton Pond.</p>
 <p>Rainfall is measured daily, in inches.</p>
 <pre class="r"><code>rain_tbl &lt;- read_csv(
-  &quot;../Data/barton_pond_raingauge_data.csv&quot;,
+  &quot;../Huron River Watershed Council/Data/barton_pond_raingauge_data.csv&quot;,
   skip = 1,
   col_names = c(&quot;date&quot;, &quot;rainfall&quot;),
   col_types = &quot;Dd&quot;
@@ -641,7 +641,7 @@ new_hudson_tbl %&gt;%
 <h3>Flow Targets</h3>
 <p>The USGS sets targets for a minimum level of flow beyond each dam. How often do we dip below those?</p>
 <pre class="r"><code># manually extracted from &quot;Example Numeric Flow Targets.docx&quot;
-flow_targets &lt;- read_csv(&quot;flow_targets.csv&quot;, col_types = &quot;ciiii&quot;) %&gt;%
+flow_targets &lt;- read_csv(&quot;../Huron River Watershed Council/Data/flow_targets.csv&quot;, col_types = &quot;ciiii&quot;) %&gt;%
   mutate(site = factor(site, levels = levels(dam_tbl$site)))
 
 dam_tbl %&gt;%
