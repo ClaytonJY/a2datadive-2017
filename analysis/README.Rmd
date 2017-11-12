@@ -1,14 +1,17 @@
 ---
 title: "Huron River Watershed Council - A2 Data Dive 2017"
 author: "Clayton Yochum"
-date: "November 11, 2017"
-output: html_document
+date: "November 12, 2017"
+output:
+  html_document:
+    code_folding: hide
 ---
 
 ```{r setup, include=FALSE}
 library(dplyr)
 library(purrr)
 library(readr)
+library(tidyr)
 library(ggplot2)
 library(RcppRoll)
 library(lubridate)
@@ -19,82 +22,122 @@ library(knitr)
 opts_chunk$set(echo = TRUE)
 ```
 
-## Data Sanity Checks
+This document is an analysis of data provided by the Huron River Watershed Council as part of the 2017 A2 Data Dive.
+
+Click the "Code" buttons above tables and plots to see the R code that generated them.
+
+
+## Data Preparation
 
 ## Dam River Flow
 
-We'll start with the pre-processed data measuring water flow below three dams on the Huron River. In order from north to south they are New Hudson, Hamburg, and Wall Street.
+We'll start with pre-processed data measuring water flow below three dams on the Huron River. In order from north to south they are New Hudson, Hamburg, and Wall Street.
 
-New Hudson has only daily readings, stops in 2014, but has no missing data. The other two have measurements in 15-minute intervals and have had some missing data imputed, while other gaps remain.
+New Hudson has only daily readings and stops in 2014, but has no missing data. The other two have measurements in 15-minute intervals and have had some missing data imputed, while other gaps remain.
 
-```{r}
+```{r dam-tables}
 
-dam_tbl <- list(
-  new_hudson  = "../Huron River Watershed Council/Data/new_hudson_preprocessed.csv",
-  hamburg     = "../Huron River Watershed Council/Data/hamburg_preprocessed.csv",
-  wall_street = "../Huron River Watershed Council/Data/wall_street_preprocessed.csv"
+dam_tbls <- list(
+  `New Hudson`  = "../Huron River Watershed Council/Data/new_hudson_preprocessed.csv",
+  `Hamburg`     = "../Huron River Watershed Council/Data/hamburg_preprocessed.csv",
+  `Wall Street` = "../Huron River Watershed Council/Data/wall_street_preprocessed.csv"
 ) %>%
-  map_dfr(
+  map(
     read_csv,
     skip = 1,
-    col_names = c("datetime", "discharge"),
-    col_types = "Td",
-    .id = "site"
+    col_names = c("datetime", "flow"),
+    col_types = "Td"
   ) %>%
-  mutate(site = factor(site, levels = unique(site)))
+  map(arrange, datetime)
+
+dam_tbl <- dam_tbls %>%
+  bind_rows(.id = "site") %>%
+  mutate(site = factor(site, levels = names(dam_tbls)))
 
 dam_tbl %>%
-  head() %>%
+  group_by(site) %>%
+  slice(c(1:3, (n() - 2):n())) %>%
   kable()
 ```
 
 We can make sure the time intervals and endpoints match what we expect.
 
-```{r}
+```{r summarize-dam-tbls}
 
 dam_tbl %>%
   group_by(site) %>%
   summarize(
-    start         = min(datetime),
-    stop          = max(datetime),
-    n             = n(),
-    avg_discharge = mean(discharge)
+    start    = min(datetime),
+    stop     = max(datetime),
+    n        = n(),
+    avg_flow = mean(flow)
   ) %>%
   kable()
 ```
 
 Can we plot it?
 
-```{r}
+```{r plot-flows}
 
-daily_tbl <- dam_tbl %>%
-  group_by(site, date = as.Date(datetime)) %>%
-  summarize(mean_discharge = mean(discharge))
-
-daily_tbl %>% 
-  ggplot(aes(x = date, y = mean_discharge, color = site)) +
-  geom_line() +
-  facet_wrap(~site, ncol = 1)
+dam_tbl %>% 
+  ggplot(aes(x = datetime, y = flow, color = site)) +
+  facet_wrap(~site, ncol = 1) +
+  geom_line()
 ```
 
 We can also free the Y axis and add a smoothing line to get a sense of the baseline differences between sites.
 
-```{r}
+```{r plot-flows-enhanced}
 
-daily_tbl %>%
-  ggplot(aes(x = date, y = mean_discharge, color = site)) +
+dam_tbl %>%
+  ggplot(aes(x = datetime, y = flow, color = site)) +
   geom_line() +
   geom_smooth(method = "gam") +
   facet_wrap(~site, ncol = 1, scales = "free_y")
 ```
 
+
+While some missing values have been imputed for Hamburg and Wall Street, we'll make remaining missing values explicit.
+
+```{r fill-missing-flows}
+
+dam_tbls <- dam_tbls %>%
+  modify_at(
+    c("Hamburg", "Wall Street"),
+    ~ .x %>%
+      complete(
+        datetime = seq(min(.$datetime), max(.$datetime), by = as.difftime(15, units = "mins")),
+        fill     = list(flow = NA_real_)
+      )
+  )
+
+dam_tbl <- dam_tbls %>%
+  bind_rows(.id = "site") %>%
+  mutate(site = factor(site, levels = names(dam_tbls)))
+
+dam_tbl %>%
+  group_by(site) %>%
+  summarize(
+    start       = min(datetime),
+    stop        = max(datetime),
+    n           = n(),
+    n_missing   = sum(is.na(flow)),
+    pct_missing = n_missing / n,
+    avg_flow    = mean(flow, na.rm = TRUE)
+  ) %>%
+  kable()
+```
+
+We see a _lot_ of missing data in Hamburg, over 10%!
+
+
 ### Rainfall
 
-There's also a set of rain gauge data from the Barton Pond.
+There's also a set of rain gauge data from the Barton Pond, which is near the Wall Street gauge.
 
 Rainfall is measured daily, in inches.
 
-```{r}
+```{r read-rainfall}
 
 rain_tbl <- read_csv(
   "../Huron River Watershed Council/Data/barton_pond_raingauge_data.csv",
@@ -110,21 +153,22 @@ rain_tbl %>%
 
 And a summary again
 
-```{r}
+```{r summarize-rainfall}
 
 rain_tbl %>%
   summarize(
-    start    = min(date),
-    stop     = max(date),
-    n        = n(),
-    avg_rain = mean(rainfall)
+    start     = min(date),
+    stop      = max(date),
+    n         = n(),
+    n_missing = sum(is.na(rainfall)),
+    avg_rain  = mean(rainfall)
   ) %>%
   kable()
 ```
 
 And a plot again
 
-```{r}
+```{r plot-rainfall}
 
 rain_tbl %>%
   ggplot(aes(x = date, y = rainfall)) +
@@ -137,45 +181,46 @@ rain_tbl %>%
 
 ### Sudden Fluctuation in Flow
 
-From the instructions, 
+From the instructions (`General Instructions.pdf`):
 
 > Sudden fluctuations are changes in flow by 150% or above within a 12 hour period.
 
 Since New Hudson is measured in daily intervals, we'll do this with the other two first.
 
-```{r}
+```{r average-flow}
 
 # 12 hours prior should be 12*4=48 points prior due to 15-minute interval
 avg_flow_tbl <- dam_tbl %>%
-  filter(site != "new_hudson") %>%
+  filter(site != "New Hudson") %>%
   group_by(site) %>% 
   arrange(datetime) %>%
   mutate(
-    lag = lag(datetime, 48),
-    past_avg_discharge = roll_meanr(lag(discharge, 1), 48)
+    lag = lag(flow, 1L),
+    past_avg_flow = roll_meanr(lag,       48, na.rm = TRUE),
+    past_missing  = roll_sumr(is.na(lag), 48) 
   ) %>%
   ungroup() %>%
-  filter(
-    difftime(datetime, lag, units = "hours") == 12  # only periods with full data
-  ) %>%
   select(-lag) %>%
-  mutate(pct_change = (discharge - past_avg_discharge) / past_avg_discharge)
+  filter(!is.na(past_missing)) %>%                              # remove early entires without history
+  mutate(pct_change = (flow - past_avg_flow) / past_avg_flow)
 
 avg_flow_tbl %>%
   group_by(site) %>%
-  slice(1:3) %>%
+  slice(c(1:3, (n() - 2):n())) %>%
   kable()
 ```
 
 How many of our samples are more than 150% or 100% higher than the past 12-hour average?
 
-```{r}
+```{r plot-average-flow}
 
 avg_flow_tbl %>%
   group_by(site) %>%
   summarize(
-    n_over_150 = sum(pct_change >= 1.5),
-    n_over_100 = sum(pct_change >= 1.0)
+    n_over_150   = sum(pct_change >= 1.5, na.rm = TRUE),
+    pct_over_150 = n_over_150 / n(),
+    n_over_100   = sum(pct_change >= 1.0, na.rm = TRUE),
+    pct_over_100 = n_over_100 / n()
   ) %>%
   kable()
 ```
@@ -186,27 +231,30 @@ So we see there are no cases at the Hamburg site where flow was above 200% of th
 
 We can't do quite the same calculation for New Hudson since it's flow is only available per-day, but we can see which points are above the thresholds when compared to the prior days' flow. This is a lot simpler to compute, and we also don't have to sweat missing data.
 
-```{r}
+```{r new-hudson-average-flow}
 
 new_hudson_tbl <- dam_tbl %>%
-  filter(site == "new_hudson") %>%
+  filter(site == "New Hudson") %>%
   arrange(datetime) %>%
   mutate(
-    past_avg_discharge = lag(discharge, 1L),
-    pct_change = (discharge - past_avg_discharge) / past_avg_discharge
-  )
+    past_avg_flow = lag(flow, 1L),
+    pct_change = (flow - past_avg_flow) / past_avg_flow
+  ) %>%
+  filter(!is.na(past_avg_flow))
 
 new_hudson_tbl %>%
   summarize(
-    n_over_150 = sum(pct_change >= 1.5, na.rm = TRUE),
-    n_over_100 = sum(pct_change >= 1.0, na.rm = TRUE)
+    n_over_150   = sum(pct_change >= 1.5),
+    pct_over_150 = n_over_150 / n(),
+    n_over_100   = sum(pct_change >= 1.0),
+    pct_over_100 = n_over_100 / n()
   ) %>%
   kable()
 ```
 
 So we see just a few days have a flow over the the thresholds compared to the previous day; might as well pull them all.
 
-```{r}
+```{r new-hudson-high-flows}
 
 new_hudson_tbl %>%
   filter(pct_change > 1.0) %>%
@@ -216,16 +264,13 @@ new_hudson_tbl %>%
 
 Plotting them might help show if this is a solved problem, or if these threshold-breaking increases still happen.
 
-```{r, warning=FALSE}
+```{r plot-average-flows}
 
-bind_rows(
-  new_hudson_tbl,
-  avg_flow_tbl
-) %>%
-  mutate(site = fct_recode(site, `New Hudson` = "new_hudson", Hamburg = "hamburg", `Wall Street` = "wall_street")) %>%
-  group_by(site, date = date(datetime)) %>%
-  summarize(max_change = max(pct_change)) %>%
-  ggplot(aes(x = date, y = max_change, color = site)) +
+avg_flow_tbl <- bind_rows(new_hudson_tbl, avg_flow_tbl)
+
+avg_flow_tbl %>%
+  filter(!is.na(pct_change)) %>%
+  ggplot(aes(x = datetime, y = pct_change, color = site)) +
   facet_wrap(~site, ncol = 1, scales = "free_y") +
   geom_line() +
   geom_hline(yintercept = c(1, 1.5), linetype = 2) +
@@ -243,22 +288,59 @@ bind_rows(
 
 The USGS sets targets for a minimum level of flow beyond each dam. How often do we dip below those?
 
-```{r}
+```{r read-flow-targets}
 
 # manually extracted from "Example Numeric Flow Targets.docx"
 flow_targets <- read_csv("../Huron River Watershed Council/Data/flow_targets.csv", col_types = "ciiii") %>%
-  mutate(site = factor(site, levels = levels(dam_tbl$site)))
+  mutate(site = factor(site, levels = unique(site), labels = levels(dam_tbl$site)))
+
+kable(flow_targets)
+```
+
+We can count how often we're below the minimums
+
+```{r count-low-flows}
+
+dam_tbl <- dam_tbl %>%
+  left_join(flow_targets, by = "site")
 
 dam_tbl %>%
-  group_by(site, date = date(datetime)) %>%
-  summarize(lowest_flow = min(discharge)) %>%
-  left_join(flow_targets, by = "site") %>%
-  ggplot(aes(x = date, y = lowest_flow, color = site)) +
-  geom_line() +
-  facet_wrap(~site, ncol = 1, scales = "free_y") +
-  geom_hline(aes(yintercept = min_flow), linetype = 2)
+  filter(!is.na(flow)) %>%
+  group_by(site) %>%
+  summarize(
+    n            = n(), 
+    n_low_flow   = sum(flow < min_flow),
+    pct_low_flow = n_low_flow / n 
+  ) %>%
+  kable()
 ```
 
 So we see that most dams tend to experience some time below the threshold. The Wall Street site in particular spends a lot of time underneath the prescribed minimum flow.
 
+Let's plot our flows again, with the mininmum flow limits superimposed.
 
+```{r plot-low-flows}
+
+dam_tbl %>%
+  filter(!is.na(flow)) %>%
+  ggplot(aes(x = datetime, y = flow, color = site)) +
+  facet_wrap(~site, ncol = 1, scales = "free_y") +
+  geom_line() +
+  geom_hline(aes(yintercept = min_flow), linetype = 2) +
+  labs(
+    x = "Date",
+    y = "Flow",
+    title = "Flow Over Time with Minimum Flow Thresholds"
+  ) +
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = scales::percent)
+```
+
+That's all I have so far; note some of this was cleaned up after the day of the actual data dive.
+
+## What to do next
+
+- Investigate yearly trends within each site
+- Look at the other flow limits provided, the ones specific to the spring storm period
+- Use the rainfall data to distinguish rain-driven spikes in flow from mand-made spikes due to dam operation
+- Build a predictive model for future flow using historic flow data and rainfall
