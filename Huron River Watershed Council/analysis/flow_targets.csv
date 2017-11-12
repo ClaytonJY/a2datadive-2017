@@ -1,0 +1,4 @@
+site,base_flow,min_flow,spring_low_flow,spring_high_flow
+new_hudson,58,46,60,284
+hamburg,154,124,155,651
+wall_street,272,218,307,1665
