@@ -5,6 +5,7 @@ date: "November 12, 2017"
 output:
   html_document:
     code_folding: hide
+    toc: yes
 ---
 
 ```{r setup, include=FALSE}
@@ -19,7 +20,9 @@ library(forcats)
 
 library(knitr)
 
-opts_chunk$set(echo = TRUE)
+theme_set(theme_bw())
+
+opts_chunk$set(echo = TRUE, fig.width = 8.5, fig.height = 8.5)
 ```
 
 This document is an analysis of data provided by the Huron River Watershed Council as part of the 2017 A2 Data Dive.
@@ -29,7 +32,7 @@ Click the "Code" buttons above tables and plots to see the R code that generated
 
 ## Data Preparation
 
-## Dam River Flow
+### Dam River Flow
 
 We'll start with pre-processed data measuring water flow below three dams on the Huron River. In order from north to south they are New Hudson, Hamburg, and Wall Street.
 
@@ -85,17 +88,58 @@ dam_tbl %>%
   geom_line()
 ```
 
-We can also free the Y axis and add a smoothing line to get a sense of the baseline differences between sites.
+There's a pretty big difference in magnitude of flow between the sites, which is expected as the cross-sections of the river are different sizes at each. We can also free the Y axis to see more of the within-site variance of flow.
 
 ```{r plot-flows-enhanced}
 
 dam_tbl %>%
   ggplot(aes(x = datetime, y = flow, color = site)) +
   geom_line() +
-  geom_smooth(method = "gam") +
   facet_wrap(~site, ncol = 1, scales = "free_y")
 ```
 
+This obscures any year-to-year similarity. Let's superimpose years atop one another
+
+```{r plot-flows-yearly}
+
+set_year <- function(x, y) {
+  year(x) <- y
+  x
+}
+
+dam_tbl %>%
+  mutate(
+    year         = year(datetime),
+    new_datetime = set_year(datetime, max(year))
+  ) %>%
+  select(site, new_datetime, year, flow) %>%
+  filter(complete.cases(.)) %>% 
+  ggplot(aes(x = new_datetime, y = flow, color = site)) +
+  facet_wrap(~site, ncol = 1, scales = "free_y") +
+  geom_line(aes(group = year, alpha = year)) +
+  geom_line(data = . %>% group_by(site, new_datetime) %>% summarize(flow = mean(flow, na.rm = TRUE)), size = 1.5) +
+  scale_x_datetime(date_breaks = "1 month", date_labels = "%b") +
+  labs(
+    x     = "Day of Year",
+    y     = bquote('Flow ('*ft^3 / s*')'),
+    alpha = "Year",
+    title = "Flow by Site and Day-of-Year",
+    subtitle = "with average line in bold"
+  ) +
+  guides(color = FALSE)
+```
+
+We can see the Wall Street data is much less smooth day-to-day than readings at the other sites. This could be due to
+
+- the flow gauge being much closer to the damn upstream than gauges at the other sites are
+- instrumentation or measurement error
+- issues in the imputatation already done on this data-
+- operational differences (this is the only automated damn)
+
+Or some mix of multiple causes.
+
+
+#### Missing Data
 
 While some missing values have been imputed for Hamburg and Wall Street, we'll make remaining missing values explicit.
 
@@ -176,6 +220,50 @@ rain_tbl %>%
   geom_smooth(method = "gam")
 ```
 
+Here it is yearly:
+
+```{r plot rainfall yearly}
+
+rain_tbl %>%
+  mutate(
+    year     = year(date),
+    new_date = set_year(date, max(year))
+  ) %>%
+  filter(!is.na(new_date)) %>%
+  ggplot(aes(x = new_date, y = rainfall)) +
+  geom_line(aes(group = year, alpha = year)) +
+  scale_x_date(date_breaks = "1 month", date_labels = "%b") +
+  labs(
+    x = "Day of Year",
+    y = "Rainfall (in.)",
+    alpha = "Year",
+    title = "Year-over-Year Daily Rainfall",
+    subtitle = "at Barton Pond"
+  )
+```
+
+Very noisy day-to-day; how about monthly totals?
+
+```{r plot-rainfall-monthly-sum}
+
+rain_tbl %>%
+  group_by(year = year(date), new_date = floor_date(date, unit = "month") %>% set_year(max(year))) %>%
+  summarize(rainfall = sum(rainfall)) %>%
+  ggplot(aes(x = new_date, y = rainfall)) +
+  geom_line(aes(group = year, alpha = year)) +
+  geom_line(data = . %>% group_by(new_date) %>% summarize(rainfall = mean(rainfall)), size = 1.5) +
+  scale_x_date(date_breaks = "1 month", date_labels = "%b") +
+  labs(
+    x = "Month",
+    y = "Rainfall (in.)",
+    alpha = "Year",
+    title = "Monthly Rainfall Totals",
+    subtitle = "at Barton Pond"
+  )
+```
+
+We see an unsurprising trend of higher rainfall in the spring, with less than half as much during winter.
+
 
 ## Main Questions
 
@@ -226,6 +314,7 @@ avg_flow_tbl %>%
 ```
 
 So we see there are no cases at the Hamburg site where flow was above 200% of the trailing 12-hour average, but there are a handful of such cases at the Wall Street site.
+
 
 #### New Hudson
 
@@ -301,10 +390,8 @@ We can count how often we're below the minimums
 
 ```{r count-low-flows}
 
-dam_tbl <- dam_tbl %>%
-  left_join(flow_targets, by = "site")
-
 dam_tbl %>%
+  left_join(flow_targets, by = "site") %>%
   filter(!is.na(flow)) %>%
   group_by(site) %>%
   summarize(
@@ -317,30 +404,108 @@ dam_tbl %>%
 
 So we see that most dams tend to experience some time below the threshold. The Wall Street site in particular spends a lot of time underneath the prescribed minimum flow.
 
-Let's plot our flows again, with the mininmum flow limits superimposed.
+Let's plot our flows again, with the minimum flow limits superimposed.
 
 ```{r plot-low-flows}
 
-dam_tbl %>%
-  filter(!is.na(flow)) %>%
-  ggplot(aes(x = datetime, y = flow, color = site)) +
+temp <- dam_tbl %>%
+  mutate(
+    year         = year(datetime),
+    new_datetime = set_year(datetime, max(year))
+  ) %>%
+  filter(complete.cases(.))
+
+targets_long <- flow_targets %>%
+  gather(limit, flow, -site)
+
+limits <- targets_long %>%
+  filter(limit %in% c("min_flow")) %>% 
+  mutate(new_datetime = min(temp$new_datetime))
+
+temp %>%
+  ggplot(aes(x = new_datetime, y = flow, color = site)) +
   facet_wrap(~site, ncol = 1, scales = "free_y") +
-  geom_line() +
-  geom_hline(aes(yintercept = min_flow), linetype = 2) +
-  labs(
-    x = "Date",
-    y = "Flow",
-    title = "Flow Over Time with Minimum Flow Thresholds"
+  geom_line(aes(group = year, alpha = year)) +
+  geom_line(data = . %>% group_by(site, new_datetime) %>% summarize(flow = mean(flow, na.rm = TRUE)), size = 1.5) +
+  geom_hline(data = limits, aes(yintercept = flow), linetype = 2) +
+  geom_text(
+    data = limits,
+    aes(x = new_datetime, y = flow, label = flow),
+    vjust = -1, hjust = 1.1, color = "black", size = 3
   ) +
-  theme(legend.position = "none") +
-  scale_y_continuous(labels = scales::percent)
+  scale_x_datetime(date_breaks = "1 month", date_labels = "%b") +
+  labs(
+    x     = "Day of Year",
+    y     = bquote('Flow ('*ft^3 / s*')'),
+    alpha = "Year",
+    title = "Flow by Site And Year",
+    subtitle = "with minimum flow guidelines (dotted line)"
+  ) +
+  guides(color = FALSE)
 ```
 
-That's all I have so far; note some of this was cleaned up after the day of the actual data dive.
+
+#### Spring Storm Season
+
+We can also focus on the spring storm season (April 15 - June 30). What percent of the time are we outside the prescribed limits?
+
+```{r spring-outside-limits}
+
+spring_only <- temp %>%
+  filter(
+    new_datetime >= as.POSIXct(paste0(unique(year(new_datetime)), "-04-15"), tz = "UTC"),
+    new_datetime <  as.POSIXct(paste0(unique(year(new_datetime)), "-07-01"), tz = "UTC")
+  ) %>%
+  left_join(flow_targets, by = "site")
+
+spring_only %>%
+  select(site, flow, spring_low_flow, spring_high_flow) %>%
+  filter(!is.na(flow)) %>%
+  group_by(site) %>%
+  summarize(
+    n                = n(), 
+    n_outside_limits = sum(pmap_dbl(list(flow, spring_low_flow, spring_high_flow), ~ !between(..1, ..2, ..3))),
+    pct_outside      = n_outside_limits / n 
+  ) %>%
+  kable()
+```
+
+Again, plenty of operation outside the prescribed limits. We can see this visually by plotting flow once again and imposing the spring-specific guideline on top.
+
+```{r plot-spring-flows}
+
+limits <- targets_long %>%
+  filter(limit %in% grep("spring", limit, value = TRUE)) %>% 
+  mutate(new_datetime = min(spring_only$new_datetime))
+
+spring_only %>%
+  ggplot(aes(x = new_datetime, y = flow, color = site)) +
+  facet_wrap(~site, ncol = 1, scales = "free_y") +
+  geom_line(aes(group = year, alpha = year)) +
+  geom_line(data = . %>% group_by(site, new_datetime) %>% summarize(flow = mean(flow, na.rm = TRUE)), size = 1.5) +
+  geom_hline(
+    data = limits,
+    aes(yintercept = flow), 
+    linetype = 2
+  ) +
+  geom_text(
+    data = limits,
+    aes(x = new_datetime, y = flow, label = flow),
+    vjust = -1, hjust = 1.1, color = "black", size = 3
+  ) +
+  scale_x_datetime(date_breaks = "1 month", date_labels = "%B") +
+  labs(
+    x     = "Date",
+    y     = bquote('Flow ('*ft^3 / s*')'),
+    alpha = "Year",
+    title = "Spring Flow by Site and Year",
+    subtitle = "with flow guidelines (dotted lines)"
+  ) +
+  guides(color = FALSE)
+```
+
 
 ## What to do next
 
-- Investigate yearly trends within each site
-- Look at the other flow limits provided, the ones specific to the spring storm period
 - Use the rainfall data to distinguish rain-driven spikes in flow from mand-made spikes due to dam operation
 - Build a predictive model for future flow using historic flow data and rainfall
